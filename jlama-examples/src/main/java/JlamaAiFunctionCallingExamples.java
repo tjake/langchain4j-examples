@@ -1,36 +1,32 @@
+import com.github.tjake.jlama.safetensors.DType;
 import dev.langchain4j.agent.tool.*;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.jlama.JlamaChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
-import dev.langchain4j.service.tool.DefaultToolExecutor;
-import dev.langchain4j.service.tool.ToolExecutor;
 
-import java.util.*;
-
-import static dev.langchain4j.data.message.UserMessage.userMessage;
-import static java.util.stream.Collectors.toList;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.Scanner;
 
 
 public class JlamaAiFunctionCallingExamples {
 
     static class Payment_Data_From_AiServices {
 
-        static ChatLanguageModel mistralAiModel = JlamaChatModel.builder()
-                .modelName("tjake/Mistral-7B-Instruct-v0.3-JQ4")
+        static ChatLanguageModel model = JlamaChatModel.builder()
+                .modelName("Qwen/Qwen2.5-1.5B-Instruct-JQ4")
                 .temperature(0.0f) //Force same output every run
                 .build();
 
         interface Assistant {
             @SystemMessage({
-                    "You are a payment transaction support agent.",
-                    "You MUST use the payment transaction tool to search the payment transaction data.",
-                    "If there is a date, convert it in a human readable format."
+                    "You are a GitHub support agent.",
+                    "You MUST use the github star tool to search requested repo for star count."
             })
             String chat(String userMessage);
         }
@@ -38,62 +34,44 @@ public class JlamaAiFunctionCallingExamples {
         public static void main(String[] args) {
             // STEP 1: User specify tools and query
             // User define all the necessary tools to be used in the chat
-            // This example uses the Payment_Transaction_Tool who define two functions as our two tools
-            Payment_Transaction_Tool paymentTool = Payment_Transaction_Tool.build();
+            // This example uses the GitHub Stars Tool
+            Github_Stars_Tool starsTool = Github_Stars_Tool.build();
             // User define the query to be used in the chat
-            String userMessage = "What is the status and the payment date of transaction T1005?";
+
+            //Read chat input from terminal
+            System.out.println("How can I help?: ");
+            String userMessage =  new Scanner(System.in).nextLine();
 
             // STEP 2: User asks the agent and AiServices call to the functions
             Assistant agent = AiServices.builder(Assistant.class)
-                    .chatLanguageModel(mistralAiModel)
-                    .tools(paymentTool)
+                    .chatLanguageModel(model)
+                    .tools(starsTool)
                     .chatMemory(MessageWindowChatMemory.withMaxMessages(10))
                     .build();
 
             // STEP 3: User gets the final response from the agent
             String answer = agent.chat(userMessage);
-            System.out.println(answer); //According to the payment transaction tool, the payment status of transaction T1005 is Pending and the payment date is 2021-10-08.
+            System.out.println(answer);
         }
-
     }
 
-    static class Payment_Transaction_Tool {
-        static Payment_Transaction_Tool build(){
-            return new Payment_Transaction_Tool();
+    static class Github_Stars_Tool {
+        static Github_Stars_Tool build(){
+            return new Github_Stars_Tool();
         }
 
         // Tool to be executed by mistral model to get payment status
-        @Tool("Get payment status of a transaction") // function description
-        static String retrievePaymentStatus(@P("Transaction id to search payment data") String transactionId) {
-           return getPaymentDataField(transactionId, "payment_status");
-        }
+        @Tool("Get number of stars for a github project") // function description
+        static Integer getStarCount(@P("The github repo name") String repo) throws IOException, InterruptedException {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repo)) // Replace with your API URL
+                    .build();
 
-        // Tool to be executed by mistral model to get payment date
-        @Tool("Get payment date of a transaction") // function description
-        static String retrievePaymentDate(@P("Transaction id to search payment data") String transactionId) {
-            return getPaymentDataField(transactionId, "payment_date");
-        }
-
-        private static Map<String, List<String>> getPaymentData() {
-            Map<String, List<String>> data = new HashMap<>();
-            data.put("transaction_id", Arrays.asList("T1001", "T1002", "T1003", "T1004", "T1005"));
-            data.put("customer_id", Arrays.asList("C001", "C002", "C003", "C002", "C001"));
-            data.put("payment_amount", Arrays.asList("125.50", "89.99", "120.00", "54.30", "210.20"));
-            data.put("payment_date", Arrays.asList("2021-10-05", "2021-10-06", "2021-10-07", "2021-10-05", "2021-10-08"));
-            data.put("payment_status", Arrays.asList("Paid", "Unpaid", "Paid", "Paid", "Pending"));
-            return data;
-        }
-
-        private static String getPaymentDataField(String transactionId, String data) {
-            List<String> transactionIds = getPaymentData().get("transaction_id");
-            List<String> paymentData = getPaymentData().get(data);
-
-            int index = transactionIds.indexOf(transactionId);
-            if (index != -1) {
-                return paymentData.get(index);
-            } else {
-                return "Transaction ID not found";
-            }
+            // Send the request and get the response
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            String stars = response.body().split("\"stargazers_count\":")[1].split(",")[0];
+            return Integer.parseInt(stars);
         }
     }
 }
